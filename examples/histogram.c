@@ -198,102 +198,71 @@ void slave(int range_min, int range_max, int data_size, int chunk_size) {
   MPI_Status status;
   MPI_Request recv_request = MPI_REQUEST_NULL;
   MPI_Request send_request = MPI_REQUEST_NULL;
-  int current_buffer = 0; // 0 for buffer_a, 1 for buffer_b
   int active = 1;
 
+  // Set up pointers for double buffering
+  int *current_buf = buffer_a;
+  int *next_buf = buffer_b;
+  int *current_len = &length_a;
+  int *next_len = &length_b;
+
   // Receive initial chunk size
-  MPI_Recv(&length_a, 1, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+  MPI_Recv(current_len, 1, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 
   // Check if termination signal on first message
-  if (status.MPI_TAG == TERMINATE_TAG || length_a == 0) {
+  if (status.MPI_TAG == TERMINATE_TAG || *current_len == 0) {
     MPI_Send(local_histogram, bins, MPI_INT, 0, HISTOGRAM_TAG, MPI_COMM_WORLD);
     active = 0;
   } else {
     // Receive first chunk of data (blocking)
-    MPI_Recv(buffer_a, length_a, MPI_INT, 0, DATA_TAG, MPI_COMM_WORLD, &status);
+    MPI_Recv(current_buf, *current_len, MPI_INT, 0, DATA_TAG, MPI_COMM_WORLD, &status);
 
     // Non-blocking send of ready message to get next chunk
     int dummy_msg = 1;
-    MPI_Isend(&dummy_msg, 1, MPI_INT, 0, READY_TAG, MPI_COMM_WORLD,
-              &send_request);
+    MPI_Isend(&dummy_msg, 1, MPI_INT, 0, READY_TAG, MPI_COMM_WORLD, &send_request);
 
     // Post non-blocking receive for next chunk size
-    MPI_Irecv(&length_b, 1, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD,
-              &recv_request);
+    MPI_Irecv(next_len, 1, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &recv_request);
   }
 
-  // Main processing loop with double buffering
+  // Main processing loop with double buffering using pointers
   while (active) {
-    // Process current buffer while waiting for next chunk
-    if (current_buffer == 0) {
-      // Process buffer A
-      for (int i = 0; i < length_a; i++) {
-        int bin_index = buffer_a[i] - range_min;
-        if (bin_index >= 0 && bin_index < bins) {
-          local_histogram[bin_index]++;
-        }
+    // Process current buffer
+    for (int i = 0; i < *current_len; i++) {
+      int bin_index = current_buf[i] - range_min;
+      if (bin_index >= 0 && bin_index < bins) {
+        local_histogram[bin_index]++;
       }
-
-      // Wait for length_b receive to complete
-      MPI_Wait(&recv_request, &status);
-
-      // Check if termination signal received
-      if (status.MPI_TAG == TERMINATE_TAG || length_b == 0) {
-        MPI_Wait(&send_request, MPI_STATUS_IGNORE);
-        MPI_Send(local_histogram, bins, MPI_INT, 0, HISTOGRAM_TAG,
-                 MPI_COMM_WORLD);
-        active = 0;
-        break;
-      }
-
-      // Receive the next chunk for buffer B
-      MPI_Recv(buffer_b, length_b, MPI_INT, 0, DATA_TAG, MPI_COMM_WORLD,
-               &status);
-
-      // Post non-blocking receive for next chunk size (for buffer A)
-      MPI_Wait(&send_request, MPI_STATUS_IGNORE);
-      int dummy_msg = 1;
-      MPI_Isend(&dummy_msg, 1, MPI_INT, 0, READY_TAG, MPI_COMM_WORLD,
-                &send_request);
-      MPI_Irecv(&length_a, 1, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD,
-                &recv_request);
-
-      current_buffer = 1;
-    } else {
-      // Process buffer B
-      for (int i = 0; i < length_b; i++) {
-        int bin_index = buffer_b[i] - range_min;
-        if (bin_index >= 0 && bin_index < bins) {
-          local_histogram[bin_index]++;
-        }
-      }
-
-      // Wait for length_a receive to complete
-      MPI_Wait(&recv_request, &status);
-
-      // Check if termination signal received
-      if (status.MPI_TAG == TERMINATE_TAG || length_a == 0) {
-        MPI_Wait(&send_request, MPI_STATUS_IGNORE);
-        MPI_Send(local_histogram, bins, MPI_INT, 0, HISTOGRAM_TAG,
-                 MPI_COMM_WORLD);
-        active = 0;
-        break;
-      }
-
-      // Receive the next chunk for buffer A
-      MPI_Recv(buffer_a, length_a, MPI_INT, 0, DATA_TAG, MPI_COMM_WORLD,
-               &status);
-
-      // Post non-blocking receive for next chunk size (for buffer B)
-      MPI_Wait(&send_request, MPI_STATUS_IGNORE);
-      int dummy_msg = 1;
-      MPI_Isend(&dummy_msg, 1, MPI_INT, 0, READY_TAG, MPI_COMM_WORLD,
-                &send_request);
-      MPI_Irecv(&length_b, 1, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD,
-                &recv_request);
-
-      current_buffer = 0;
     }
+
+    // Wait for next_len receive to complete
+    MPI_Wait(&recv_request, &status);
+
+    // Check if termination signal received
+    if (status.MPI_TAG == TERMINATE_TAG || *next_len == 0) {
+      MPI_Wait(&send_request, MPI_STATUS_IGNORE);
+      MPI_Send(local_histogram, bins, MPI_INT, 0, HISTOGRAM_TAG, MPI_COMM_WORLD);
+      active = 0;
+      break;
+    }
+
+    // Receive the next chunk for next_buf
+    MPI_Recv(next_buf, *next_len, MPI_INT, 0, DATA_TAG, MPI_COMM_WORLD, &status);
+
+    // Post non-blocking receive for next chunk size (for current_buf)
+    MPI_Wait(&send_request, MPI_STATUS_IGNORE);
+    int dummy_msg = 1;
+    MPI_Isend(&dummy_msg, 1, MPI_INT, 0, READY_TAG, MPI_COMM_WORLD, &send_request);
+    MPI_Irecv(current_len, 1, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &recv_request);
+
+    // Swap buffers and lengths
+    int *tmp_buf = current_buf;
+    current_buf = next_buf;
+    next_buf = tmp_buf;
+
+    int *tmp_len = current_len;
+    current_len = next_len;
+    next_len = tmp_len;
   }
 
   // Free resources
