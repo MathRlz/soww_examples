@@ -1,37 +1,37 @@
+#include <omp.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <omp.h>
 
 int main(int argc, char *argv[]) {
-    if (argc != 3) {
-        printf("Użycie: %s <liczba_wątków> <n>\n", argv[0]);
-        return 1;
-    }
+  if (argc != 3) {
+    printf("Użycie: %s <liczba_wątków> <n>\n", argv[0]);
+    return 1;
+  }
 
-    int threads = atoi(argv[1]);
-    int n = atoi(argv[2]);
-    int *array = malloc(n * sizeof(int));
-    int sum = 0;
+  int threads = atoi(argv[1]);
+  int n = atoi(argv[2]);
+  int *array = malloc(n * sizeof(int));
+  int sum = 0;
 
-    // Inicjalizacja tablicy
-    for (int i = 0; i < n; i++) {
-        array[i] = 1;
-    }
+  // Inicjalizacja tablicy
+  for (int i = 0; i < n; i++) {
+    array[i] = 1;
+  }
 
-    omp_set_num_threads(threads);
+  omp_set_num_threads(threads);
 
-    double start = omp_get_wtime();
+  double start = omp_get_wtime();
 
-    #pragma omp parallel for reduction(+:sum)
-    for (int i = 0; i < n; i++) {
-        sum += array[i];
-    }
+#pragma omp parallel for reduction(+ : sum)
+  for (int i = 0; i < n; i++) {
+    sum += array[i];
+  }
 
-    double end = omp_get_wtime();
+  double end = omp_get_wtime();
 
-    printf("Suma elementów tablicy: %d\n", sum);
-    printf("Czas wykonania: %f sekund\n", end - start);
+  printf("Suma elementów tablicy: %d\n", sum);
+  printf("Czas wykonania: %f sekund\n", end - start);
 
-    free(array);
-    return 0;
+  free(array);
+  return 0;
 }
